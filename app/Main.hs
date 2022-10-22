@@ -1,16 +1,20 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE RankNTypes         #-}
+{-# LANGUAGE RecordWildCards    #-}
 
 module Main where
 
-import           Control.Exception (SomeException (..), catch)
+import           Control.Concurrent.Async
+import           Control.Concurrent.STM
+import           Control.Exception
 import           Control.Monad.Logger (runNoLoggingT)
 import           Control.Monad.Reader
 import qualified Data.Aeson
 import qualified Data.ByteString.UTF8 as BU
 import           Data.Maybe
 import qualified Data.Text as T
+import           Data.Time.Clock
 import           Database.Persist.Postgresql
 import           Network.MQTT.Client
 import           Network.MQTT.Topic
@@ -25,6 +29,7 @@ main :: IO ()
 main = do
   dbCon <- initDb
   runSqlPool (runMigration S.migrateAll) dbCon
+  mq <- atomically $ newTBQueue 100
 
   mqttHost <- fromMaybe "127.0.0.1" <$> lookupEnv "MQTT_HOST"
   mqttPort <- fromMaybe "1883" <$> lookupEnv "MQTT_PORT"
@@ -37,28 +42,38 @@ main = do
                    _                  -> error "either set both MQTT_USER and MQTT_PW or leave both blank"
   when (isNothing uri_m) $
     error "failed to parse mqtt uri\n"
-  mc <- connectURI mqttConfig{ _msgCB = SimpleCallback (msgReceived dbCon) } $ fromJust uri_m
-  print =<< subscribe mc [("blockperf/+", subOptions)] []
-  waitForClient mc
+  mc <- connectURI mqttConfig{ _msgCB = SimpleCallback (msgReceived mq) } $ fromJust uri_m
+  withAsync (insertMsg mq dbCon) $ \dbaid -> do
+    print =<< subscribe mc [("blockperf/#", subOptions { _subQoS = QoS1 })] []
+    waitForClient mc
+    cancel dbaid
+
  where
   initDb :: IO ConnectionPool
   initDb = do
     dbConstr <- fromMaybe "host=127.0.0.1 port=5432 dbname=slurpdb" <$> lookupEnv "SLURP_DB"
     runNoLoggingT $ createPostgresqlPool (BU.fromString dbConstr) 1
 
+  insertMsg mq con =
+    forever $ do
+      (t, bs) <- atomically $ readTBQueue mq
+      let (Just provider) = T.takeWhile (\c -> c /= '/') <$> (T.stripPrefix "blockperf/" $ unTopic t)
+      printf "%s %s Inserting block %d, delay %d\n" (unTopic t) (bsLocalAddr bs)
+          (bsBlockNo bs)
+          (bsHeaderDelta bs + bsBlockReqDelta bs + bsBlockRspDelta bs +
+           bsBlockAdoptDelta bs)
 
-  msgReceived con _ t m _ = do
+      void $ runSqlPool (insertBlockSample provider bs) con
+
+  msgReceived mq _ t m _ = do
     case Data.Aeson.eitherDecode m :: Either String BlockSample of
-         Left err -> print err
+         Left err -> do
+           -- XXX excessive number of invalid messages should cause the user to be blacklisted.
+           now <- getCurrentTime
+           printf "%s: %s from %s\n" (show now) err (show m)
          Right bs -> do
            if sane bs
-             then do
-               let (Just provider) = T.stripPrefix "blockperf/" $ unTopic t
-               printf "%s %s Inserting block %d, delay %d\n" (unTopic t) (bsLocalAddr bs)
-                 (bsBlockNo bs)
-                 (bsHeaderDelta bs + bsBlockReqDelta bs + bsBlockRspDelta bs +
-                  bsBlockAdoptDelta bs)
-               void $ runSqlPool (insertBlockSample provider bs) con
+             then atomically $ writeTBQueue mq (t, bs)
              else printf "Ignoring %s\n" (show bs)
 
 sane :: BlockSample -> Bool
@@ -69,6 +84,8 @@ sane BlockSample{..} =
      T.length bsHeaderRemoteAddr > 32 ||
      T.length bsBlockRemoteAddr > 32 ||
      T.length bsLocalAddr > 32 ||
+     bsSize == 0 ||
+     bsSize > 10_000_000 ||
      bsHeaderDelta > 60000 ||
      bsBlockReqDelta > 10000 ||
      bsBlockRspDelta > 60000 ||
