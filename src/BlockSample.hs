@@ -1,13 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE StrictData        #-}
 
 module BlockSample where
 
 import           Control.Monad (mzero)
 import           Data.Aeson
+import           Data.Aeson.Types
 import           Data.Int
 import           Data.Word
 import           Data.Text (Text)
+import           Text.Read
 
 data BlockSample = BlockSample {
     bsMagic            :: Word32
@@ -28,22 +31,28 @@ data BlockSample = BlockSample {
   , bsLocalPort        :: Word16
 } deriving Show
 
+read' :: Read a => String -> Parser a
+read' str =
+  case readMaybe str of
+       Nothing -> fail "BlockSample field is not a number"
+       Just n  -> return n
+
 instance FromJSON BlockSample where
   parseJSON (Object o) = BlockSample
-                    <$> (read <$> o .: "magic")
+                    <$> (read' =<< ( o .: "magic"))
                     <*> o .: "bpVersion"
-                    <*> (read <$> o .: "blockNo")
-                    <*> (read <$> o .: "slotNo")
+                    <*> (read' =<< o .: "blockNo")
+                    <*> (read' =<< o .: "slotNo")
                     <*> o .: "blockHash"
-                    <*> (read <$> o .: "blockSize")
+                    <*> (read' =<< o .: "blockSize")
                     <*> o .: "headerRemoteAddr"
-                    <*> (read <$> o .: "headerRemotePort")
-                    <*> (read <$> o .: "headerDelta")
-                    <*> (read <$> o .: "blockReqDelta")
-                    <*> (read <$> o .: "blockRspDelta")
-                    <*> (read <$> o .: "blockAdoptDelta")
+                    <*> (read' =<< o .: "headerRemotePort")
+                    <*> (read' =<< o .: "headerDelta")
+                    <*> (read' =<< o .: "blockReqDelta")
+                    <*> (read' =<< o .: "blockRspDelta")
+                    <*> (read' =<< o .: "blockAdoptDelta")
                     <*> o .: "blockRemoteAddress"
-                    <*> (read <$> o .: "blockRemotePort")
+                    <*> (read' =<< o .: "blockRemotePort")
                     <*> o .: "blockLocalAddress"
-                    <*> (read <$> o .: "blockLocalPort")
+                    <*> (read' =<< o .: "blockLocalPort")
   parseJSON _          = mzero
