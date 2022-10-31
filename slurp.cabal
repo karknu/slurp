@@ -24,11 +24,16 @@ extra-source-files: CHANGELOG.md
 library
      build-depends:    base ^>=4.14.3.0
                     , aeson
+                    , iproute
                     , persistent
                     , text
+                    , servant-client
+                    , servant-server
 
     hs-source-dirs:   src
     exposed-modules:  BlockSample
+                      Servant.IpRegistry.Api
+                      Servant.IpRegistry.Client
                       Schema
     default-language: Haskell2010
     ghc-options:
@@ -46,11 +51,14 @@ executable slurp
     build-depends:    base ^>=4.14.3.0
                     , aeson
                     , async
+                    , http-client-tls
+                    , iproute
                     , mtl
                     , monad-logger
                     , net-mqtt
                     , network-uri
                     , persistent-postgresql
+                    , servant-client
                     , slurp
                     , stm
                     , text

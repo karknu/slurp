@@ -25,3 +25,7 @@ Optional user and password to your mqtt broker.
 
 Host name and port number for your mqtt broker.
 
+### IPR_KEY
+Optional API key for geolocation lookup through https://ipregistry.co .
+Results are cached to minimize the number of API calls.
+

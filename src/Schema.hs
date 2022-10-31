@@ -35,8 +35,9 @@ share
     deriving Show
 
   Peer
-    addr Text
-    port Word16
+    addr       Text
+    port       Word16
+    geoip      (Maybe GeoIPId)
     UniquePeer addr port
     deriving Show
 
@@ -54,5 +55,17 @@ share
     blockAdoptDelta   Int32
     UniqueBlockSample relay hash
     deriving Show
+
+  GeoIP
+    addr    Text
+    company   (Maybe Text)
+    asn       (Maybe Int)
+    continent (Maybe Text)
+    country   (Maybe Text)
+    region    (Maybe Text)
+    city      (Maybe Text)
+    latitude  (Maybe Double)
+    longitude (Maybe Double)
+    UniqueGeoIP addr
 |]
 
